@@ -65,20 +65,27 @@ class Trainer:
 
     @staticmethod
     def load_dataset(self):
-        transform = transforms.Compose(
-            [transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
-
-        trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
-                                                download=True, transform=transform)
-        trainloader = torch.utils.data.DataLoader(trainset, batch_size=self.batch_size,
-                                                shuffle=True)
-
-        testset = torchvision.datasets.CIFAR10(root='./data', train=False,
-                                            download=True, transform=transform)
-        testloader = torch.utils.data.DataLoader(testset, batch_size=self.batch_size,
-                                                shuffle=False)
-
+        transform = transforms.Compose([
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
+        ])
+        dl_args = {
+            "root": './data', 
+            "download": True,
+            "transform": transform
+        }
+        trainset = torchvision.datasets.CIFAR10(train=True, **dl_args)
+        trainloader = torch.utils.data.DataLoader(
+            trainset, 
+            batch_size = self.batch_size,
+            shuffle = True
+        )
+        testset = torchvision.datasets.CIFAR10(train=False, **dl_args)
+        testloader = torch.utils.data.DataLoader(
+            testset,
+            batch_size=self.batch_size,
+            shuffle=False
+        )
         return trainloader, testloader
 
     @staticmethod
@@ -178,6 +185,12 @@ class Trainer:
                              y: torch.Tensor
                              ) -> Tuple[torch.Tensor, torch.Tensor]:
         predicted = self.network.forward(X)
+        # In training we noticed that predictions and labels had different
+        # numbers of dimensions. We validate here that they match.
+        if y.dim() < predicted.dim():
+            y = torch.unsqueeze(y, 1)
+        assert (a := predicted.shape) == (b := y.shape), \
+            f"Mismatched shapes: {a} vs. {b}"
         return (
             nn.MSELoss()(predicted, y),
             nn.L1Loss()(predicted, y)
@@ -189,8 +202,20 @@ class Trainer:
         # Partially reusing: https://pytorch.org/tutorials/beginner
         # /introyt/trainingyt.html#the-training-loop
         self.optimizer.zero_grad()
-        loss, mae = self.compute_loss_and_mae(X_batch, y_batch)
-        loss.backward()
+        loss, mae = self.compute_loss_and_mae(
+            X_batch, 
+            y_batch.float()
+        )
+        try:
+            loss.backward()
+        except RuntimeError as e:
+            print("\n\t".join([
+                "dtypes in training_step:",
+                f"X_batch: {X_batch.dtype}",
+                f"y_batch: {y_batch.dtype}",
+                f"loss: {loss.dtype}"
+            ]))
+            raise e
         self.optimizer.step()
         return loss, mae
 
